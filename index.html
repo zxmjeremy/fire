@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FIRE 个人资产管理系统（金额净值版）</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans">
+
+<div id="app" v-cloak>
+    <div v-if="!isLoggedIn" class="fixed inset-0 bg-gray-950 flex items-center justify-center z-50">
+        <div class="bg-gray-800 p-8 rounded-xl shadow-2xl w-full max-w-md border border-gray-700">
+            <h2 class="text-2xl font-bold text-center mb-6 text-emerald-400">⚡ FIRE 金额净值系统</h2>
+            <div class="mb-4">
+                <label class="block text-sm text-gray-400 mb-2">系统访问密码</label>
+                <input type="password" v-model="loginPassword" @keyup.enter="handleLogin" class="w-full px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white text-center tracking-widest">
+            </div>
+            <button @click="handleLogin" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-4 rounded-lg transition">解锁系统</button>
+        </div>
+    </div>
+
+    <div v-else class="flex flex-col h-screen overflow-hidden">
+        <header class="bg-gray-800 border-b border-gray-700 px-6 py-4 flex justify-between items-center shrink-0">
+            <div class="flex items-center space-x-4">
+                <span class="text-xl font-bold text-emerald-400">FIRE NetNAV</span>
+                <div class="flex space-x-2 bg-gray-700 p-1 rounded-lg text-sm">
+                    <button @click="currentTab = 'dashboard'" :class="['px-3 py-1.5 rounded-md', currentTab === 'dashboard' ? 'bg-gray-600 text-white' : 'text-gray-400']">资产大盘</button>
+                    <button @click="openSnapshotTab" :class="['px-3 py-1.5 rounded-md', currentTab === 'snapshot' ? 'bg-gray-600 text-white' : 'text-gray-400']">资产对账</button>
+                    <button @click="currentTab = 'manage'" :class="['px-3 py-1.5 rounded-md', currentTab === 'manage' ? 'bg-gray-600 text-white' : 'text-gray-400']">系统配置</button>
+                </div>
+            </div>
+            <div class="flex items-center space-x-6 text-sm">
+                <div class="text-gray-400">1 USD = {{ rates.USD }} CNY | 1 HKD = {{ rates.HKD }} CNY</div>
+                <button @click="handleLogout" class="text-red-400 hover:text-red-300">安全退出</button>
+            </div>
+        </header>
+
+        <div class="flex flex-1 overflow-hidden">
+            <aside class="w-[400px] bg-gray-800/40 border-r border-gray-700 flex flex-col overflow-y-auto p-4 shrink-0">
+                <div class="mb-4 flex justify-between items-center">
+                    <h3 class="text-xs font-semibold text-gray-400 uppercase">资产树 ({{ currentMonth }})</h3>
+                    <span class="text-xs bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full font-bold">¥{{ formatMoney(totalNetAssets) }}</span>
+                </div>
+                <div v-for="acc in accountTree" :key="acc.id" class="mb-3 bg-gray-800 rounded-lg p-2 border border-gray-700/50">
+                    <div class="flex justify-between items-center font-medium text-gray-200 px-2 py-1 bg-gray-700/30 rounded">
+                        <span class="truncate text-sm">📂 {{ acc.name }}</span>
+                        <span class="text-sm text-emerald-400 font-mono">¥{{ formatMoney(acc.total_cny) }}</span>
+                    </div>
+                    <div class="mt-1 pl-2 pr-1 space-y-1">
+                        <div v-for="ast in acc.assets" :key="ast.id" class="flex justify-between items-center text-xs text-gray-400 py-1 border-b border-gray-700/30 last:border-0 hover:bg-gray-700/10 rounded px-1">
+                            <div class="flex items-center space-x-1.5 min-w-0">
+                                <span class="truncate max-w-[70px] text-gray-300" :title="ast.name">🔹{{ ast.name }}</span>
+                                <span class="text-[10px] bg-gray-700 text-gray-400 px-1 py-0.5 rounded scale-90 shrink-0">{{ ast.type }}</span>
+                                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0" :class="getRiskBadgeClass(ast.risk_level)">{{ ast.risk_level }}</span>
+                            </div>
+                            <div class="text-right font-mono shrink-0 space-y-px">
+                                <div class="text-gray-200 text-[11px]">
+                                    <span>{{ formatMoney(ast.market_value) }}</span>
+                                    <span class="text-[9px] text-gray-500 ml-0.5">{{ ast.currency }}</span>
+                                    <span v-if="ast.currency !== 'CNY'" class="text-gray-400 text-[10px] ml-1 bg-gray-900 px-1 rounded">¥{{ formatMoney(ast.cny_market_value) }}</span>
+                                </div>
+                                <div :class="['text-[10px]', ast.profit_loss >= 0 ? 'text-red-400' : 'text-green-400']">
+                                    <span>{{ ast.profit_loss >= 0 ? '+' : '' }}{{ formatMoney(ast.profit_loss) }}</span>
+                                    <span v-if="ast.currency !== 'CNY'" class="text-[9px] opacity-80 ml-1">
+                                        ({{ ast.cny_profit_loss >= 0 ? '+' : '' }}¥{{ formatMoney(ast.cny_profit_loss) }})
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="flex-1 overflow-y-auto p-6">
+                <div v-show="currentTab === 'dashboard'" class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-sm text-gray-400 mb-1">全球折合总净资产 (CNY)</div>
+                            <div class="text-3xl font-bold text-gray-100 font-mono">¥ {{ formatMoney(totalNetAssets) }}</div>
+                        </div>
+                        <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                            <div class="text-sm text-gray-400 mb-1">当月折合总损益 (CNY)</div>
+                            <div :class="['text-3xl font-bold font-mono', totalProfitLoss >= 0 ? 'text-red-400' : 'text-green-400']">
+                                {{ totalProfitLoss >= 0 ? '+' : '' }}¥ {{ formatMoney(totalProfitLoss) }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 h-80" id="typeChart"></div>
+                        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 h-80" id="riskChart"></div>
+                        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 h-80 lg:col-span-2" id="trendChart"></div>
+                    </div>
+                </div>
+
+                <div v-show="currentTab === 'snapshot'" class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">对账月份</label>
+                                <input type="month" v-model="snapshotMonth" @change="loadSnapshotData" class="bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-emerald-500">
+                            </div>
+                        </div>
+                        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                            <div class="text-xs text-gray-400 mb-0.5">当月期末总资产 (折合本位币)</div>
+                            <div class="text-xl font-bold text-gray-100 font-mono">¥ {{ formatMoney(snapshotTotalLast) }}</div>
+                        </div>
+                        <div class="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                            <div class="text-xs text-gray-400 mb-0.5">当月清算总损益 (折合本位币)</div>
+                            <div :class="['text-xl font-bold font-mono', snapshotTotalProfit >= 0 ? 'text-red-400' : 'text-green-400']">
+                                {{ snapshotTotalProfit >= 0 ? '+' : '' }}¥ {{ formatMoney(snapshotTotalProfit) }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow space-y-px">
+                        <div class="grid grid-cols-12 bg-gray-700/50 text-xs font-semibold text-gray-400 border-b border-gray-700 p-4 sticky top-0 z-10 items-center">
+                            <div class="col-span-3 pl-2">资产账户 / 标的项目</div>
+                            <div class="col-span-1 text-center">清算币种</div>
+                            <div class="col-span-3 text-right pr-4">期初净值 (锁定)</div>
+                            <div class="col-span-3 text-right pr-4">最新期末净值 (输入原币)</div>
+                            <div class="col-span-2 text-right pr-4">当月净损益 (含本位币)</div>
+                        </div>
+
+                        <div v-for="acc in snapshotTree" :key="acc.id" class="border-b border-gray-700/40 last:border-0">
+                            <div class="bg-gray-800/90 px-4 py-2.5 grid grid-cols-13 items-center border-b border-gray-700/40 select-none">
+                                <div class="col-span-4 flex items-center space-x-2">
+                                    <span class="font-bold text-emerald-400 text-sm">📂 {{ acc.name }}</span>
+                                    <span class="text-[10px] text-gray-500 font-mono bg-gray-900/60 px-1.5 py-0.5 rounded">含 {{ acc.assets.length }} 项</span>
+                                </div>
+                                <div class="col-span-1 text-center text-[10px] text-gray-500 font-medium tracking-wider">CNY合计</div>
+                                
+                                <div class="col-span-3 text-right font-mono text-xs text-emerald-500/80 font-bold pr-4">
+                                    ¥ {{ formatMoney(acc.total_init_cny) }}
+                                </div>
+                                
+                                <div class="col-span-3 text-right pr-4">
+                                    <span class="text-xs font-mono font-bold text-blue-400 bg-gray-950 px-2 py-0.5 rounded border border border-gray-800/60">
+                                        ¥ {{ formatMoney(acc.total_last_cny) }}
+                                    </span>
+                                </div>
+
+                                <div class="col-span-2 text-right font-mono text-xs font-bold pr-4 truncate">
+                                    <span :class="(acc.total_last_cny - acc.total_init_cny) >= 0 ? 'text-red-400' : 'text-green-400'">
+                                        {{ (acc.total_last_cny - acc.total_init_cny) >= 0 ? '+' : '' }}¥{{ formatMoney(acc.total_last_cny - acc.total_init_cny) }}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div v-for="item in acc.assets" :key="item.asset_id" class="grid grid-cols-13 items-center hover:bg-gray-700/10 p-2 pl-8 border-b border-gray-700/20 last:border-0">
+                                
+                                <div class="col-span-4 flex items-center space-x-2 min-w-0">
+                                    <span v-if="item.savingStatus" class="text-[10px] scale-90 shrink-0" :class="item.savingStatus === 'saved' ? 'text-emerald-400' : 'text-amber-400'">
+                                        {{ item.savingStatus === 'saved' ? '●' : '⏳' }}
+                                    </span>
+                                    <span v-else class="text-gray-500 text-xs shrink-0">🔹</span>
+                                    <span class="font-medium text-gray-200 text-sm truncate" :title="item.asset_name">{{ item.asset_name }}</span>
+                                    <span class="text-[10px] bg-gray-700 text-gray-400 px-1 py-0.5 rounded scale-90 shrink-0">{{ item.type }}</span>
+                                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0" :class="getRiskBadgeClass(item.risk_level)">{{ item.risk_level }}</span>
+                                </div>
+
+                                <div class="col-span-1 font-mono text-gray-400 text-xs text-center bg-gray-900/40 py-0.5 rounded mx-2">{{ item.currency }}</div>
+                                
+                                <div class="col-span-3 flex items-center justify-end space-x-1 pr-4 min-w-0">
+                                    <span v-if="item.currency !== 'CNY'" class="text-[10px] text-gray-500 font-mono truncate max-w-[90px]">
+                                        ¥{{ formatMoney(item.init_nav * item.exchange_rate) }}
+                                    </span>
+                                    <input type="number" step="any" v-model.number="item.init_nav" disabled
+                                           class="w-24 bg-gray-950/40 border border-gray-800/80 text-right font-mono text-emerald-600/80 text-xs rounded px-2 py-1 cursor-not-allowed select-none">
+                                </div>
+                                
+                                <div class="col-span-3 flex items-center justify-end space-x-1 pr-4 min-w-0">
+                                    <span v-if="item.currency !== 'CNY'" class="text-[10px] text-gray-400 font-mono bg-gray-950 px-1.5 py-1 rounded border border-gray-800 truncate max-w-[90px]">
+                                        ¥{{ formatMoney(item.last_nav * item.exchange_rate) }}
+                                    </span>
+                                    <input type="number" step="any" v-model.number="item.last_nav" 
+                                           @blur="autoSaveRow(item)" @keyup.enter="$event.target.blur()"
+                                           class="w-24 bg-gray-900 border border-gray-700 focus:border-blue-500 focus:outline-none rounded px-2 py-1 text-right font-mono text-blue-400 text-xs focus:bg-gray-950">
+                                </div>
+
+                                <div class="col-span-2 text-right font-mono text-xs pr-4 whitespace-nowrap overflow-x-auto scrollbar-none">
+                                    <span :class="(item.last_nav - item.init_nav) >= 0 ? 'text-red-400' : 'text-green-400'">
+                                        {{ (item.last_nav - item.init_nav) >= 0 ? '+' : '' }}{{ formatMoney(item.last_nav - item.init_nav) }}
+                                    </span>
+                                    <span v-if="item.currency !== 'CNY'" :class="['text-[10px] ml-1 px-1 bg-gray-950/80 rounded border border-gray-800/50', (item.last_nav - item.init_nav) >= 0 ? 'text-red-500' : 'text-green-500']">
+                                        (¥{{ formatMoney((item.last_nav - item.init_nav) * item.exchange_rate) }})
+                                    </span>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-show="currentTab === 'manage'" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 space-y-4 lg:col-span-2">
+                        <h3 class="text-md font-medium border-b border-gray-700 pb-2 text-emerald-400">⚙️ 汇率与系统安全密钥设定</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div><label class="block text-xs text-gray-400 mb-1">1 USD = ? CNY</label><input type="number" step="any" v-model.number="configForm.rate_usd" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 font-mono text-white"></div>
+                            <div><label class="block text-xs text-gray-400 mb-1">1 HKD = ? CNY</label><input type="number" step="any" v-model.number="configForm.rate_hkd" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 font-mono text-white"></div>
+                            <div><label class="block text-xs text-gray-400 mb-1">新安全密码 (留空不改)</label><input type="password" v-model="configForm.new_password" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-1.5 text-white"></div>
+                        </div>
+                        <button @click="saveConfig" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-4 py-2 rounded-lg">保存基础设置</button>
+                    </div>
+
+                    <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                        <div class="flex justify-between items-center border-b border-gray-700 pb-3 mb-4">
+                            <h3 class="text-md font-medium">🏦 资产账户控制</h3>
+                            <button @click="openAccountModal(null)" class="text-xs text-emerald-400 font-medium">+ 新增账户</button>
+                        </div>
+                        <div class="overflow-y-auto max-h-80 divide-y divide-gray-700">
+                            <div v-for="acc in rawAccounts" :key="acc.id" class="py-3 flex justify-between items-center">
+                                <div><span class="text-gray-200 font-medium">{{ acc.name }}</span> <span class="text-xs text-emerald-500 font-mono">[排序: {{ acc.sort_order }}]</span></div>
+                                <div class="space-x-3 text-xs"><button @click="openAccountModal(acc)" class="text-blue-400">修改</button><button @click="deleteAccount(acc.id)" class="text-red-400">删除</button></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                        <div class="flex justify-between items-center border-b border-gray-700 pb-3 mb-4">
+                            <h3 class="text-md font-medium">💹 细分标的项目管理</h3>
+                            <button @click="openAssetModal(null)" class="text-xs text-emerald-400 font-medium">+ 新增标的</button>
+                        </div>
+                        <div class="overflow-y-auto max-h-80 divide-y divide-gray-700">
+                            <div v-for="ast in rawAssets" :key="ast.id" class="py-3 flex justify-between items-center">
+                                <div>
+                                    <span class="text-gray-200 font-medium">{{ ast.name }}</span> <span class="text-xs text-emerald-500 font-mono">[排序: {{ ast.sort_order }}]</span>
+                                    <div class="text-xs text-gray-500">{{ ast.account_name }} | {{ ast.type }} | {{ ast.currency }}</div>
+                                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded" :class="getRiskBadgeClass(ast.risk_level)">风险等级: {{ ast.risk_level }}</span>
+                                </div>
+                                <div class="space-x-3 text-xs"><button @click="openAssetModal(ast)" class="text-blue-400">修改</button><button @click="deleteAsset(ast.id)" class="text-red-400">删除</button></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <div v-if="accountModal.show" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div class="bg-gray-800 border border-gray-700 p-6 rounded-xl w-full max-w-md">
+            <h4 class="text-md font-bold mb-4 text-emerald-400">{{ accountModal.isEdit ? '修改账户' : '新增账户' }}</h4>
+            <div class="space-y-4">
+                <input type="text" v-model="accountModal.form.name" placeholder="账户名称" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                <input type="number" v-model.number="accountModal.form.sort_order" placeholder="排序号" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white font-mono">
+                <textarea v-model="accountModal.form.description" placeholder="描述" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white h-16"></textarea>
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button @click="accountModal.show = false" class="bg-gray-700 px-4 py-2 rounded-lg text-sm">取消</button>
+                <button @click="saveAccountModal" class="bg-emerald-600 px-4 py-2 rounded-lg text-sm text-white font-medium">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="assetModal.show" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+        <div class="bg-gray-800 border border-gray-700 p-6 rounded-xl w-full max-w-md">
+            <h4 class="text-md font-bold mb-4 text-emerald-400">{{ assetModal.isEdit ? '修改项目' : '新增项目' }}</h4>
+            <div class="space-y-4">
+                <select v-model="assetModal.form.account_id" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                    <option v-for="acc in rawAccounts" :key="acc.id" :value="acc.id">{{ acc.name }}</option>
+                </select>
+                <input type="text" v-model="assetModal.form.name" placeholder="标的名称" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white">
+                <div class="grid grid-cols-2 gap-4">
+                    <select v-model="assetModal.form.type" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"><option value="现金">现金</option><option value="股票">股票</option><option value="基金">基金</option><option value="理财">理财</option></select>
+                    <input type="number" v-model.number="assetModal.form.sort_order" placeholder="排序号" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white font-mono">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <select v-model="assetModal.form.risk_level" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"><option value="R1">R1</option><option value="R2">R2</option><option value="R3">R3</option><option value="R4">R4</option><option value="R5">R5</option></select>
+                    <select v-model="assetModal.form.currency" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white"><option value="CNY">CNY</option><option value="USD">USD</option><option value="HKD">HKD</option></select>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end space-x-3">
+                <button @click="assetModal.show = false" class="bg-gray-700 px-4 py-2 rounded-lg text-sm">取消</button>
+                <button @click="saveAssetModal" class="bg-emerald-600 px-4 py-2 rounded-lg text-sm text-white font-medium">确认</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+createApp({
+    setup() {
+        const isLoggedIn = ref(false);
+        const loginPassword = ref('');
+        const currentTab = ref('dashboard');
+        const currentMonth = ref('');
+        const rates = ref({ USD: 7.25, HKD: 0.93 });
+        const rawAccounts = ref([]);
+        const rawAssets = ref([]);
+        const snapshotMonth = ref(new Date().toISOString().slice(0, 7));
+        const snapshotList = ref([]);
+        const configForm = ref({ rate_usd: 7.25, rate_hkd: 0.93, new_password: '' });
+
+        const accountModal = ref({ show: false, isEdit: false, form: { id: null, name: '', description: '', sort_order: 0 } });
+        const assetModal = ref({ show: false, isEdit: false, form: { id: null, account_id: '', name: '', type: '现金', risk_level: 'R1', currency: 'CNY', sort_order: 0 } });
+
+        async function apiFetch(url, options = {}) {
+            const response = await fetch(url, options);
+            if (response.status === 401) { isLoggedIn.value = false; return null; }
+            return await response.json();
+        }
+
+        async function handleLogin() {
+            const res = await apiFetch('api.php?action=login', { method: 'POST', body: JSON.stringify({ password: loginPassword.value }) });
+            if (res && res.success) { isLoggedIn.value = true; loginPassword.value = ''; initSystem(); } else { alert('密码错误'); }
+        }
+        async function handleLogout() { await apiFetch('api.php?action=logout'); isLoggedIn.value = false; }
+
+        async function initSystem() {
+            const res = await apiFetch('api.php?action=dashboard');
+            if (!res) return;
+            isLoggedIn.value = true;
+            currentMonth.value = res.current_month;
+            rates.value = res.rates;
+            rawAccounts.value = res.accounts;
+            rawAssets.value = res.assets_raw;
+            configForm.value.rate_usd = res.rates.USD;
+            configForm.value.rate_hkd = res.rates.HKD;
+            nextTick(() => { renderCharts(); });
+        }
+
+        const accountTree = computed(() => {
+            return rawAccounts.value.map(acc => {
+                const matched = rawAssets.value.filter(ast => ast.account_id === acc.id);
+                return { ...acc, total_cny: matched.reduce((s, a) => s + (parseFloat(a.cny_market_value) || 0), 0), assets: matched };
+            });
+        });
+
+        const snapshotTree = computed(() => {
+            return rawAccounts.value.map(acc => {
+                const matchedAssets = snapshotList.value.filter(ast => ast.account_id === acc.id);
+                const total_init_cny = matchedAssets.reduce((sum, item) => sum + ((parseFloat(item.init_nav) || 0) * (parseFloat(item.exchange_rate) || 1.0)), 0);
+                const total_last_cny = matchedAssets.reduce((sum, item) => sum + ((parseFloat(item.last_nav) || 0) * (parseFloat(item.exchange_rate) || 1.0)), 0);
+                return { ...acc, assets: matchedAssets, total_init_cny, total_last_cny };
+            }).filter(acc => acc.assets.length > 0); 
+        });
+
+        const snapshotTotalLast = computed(() => {
+            return snapshotList.value.reduce((sum, item) => sum + ((parseFloat(item.last_nav) || 0) * (parseFloat(item.exchange_rate) || 1.0)), 0);
+        });
+        const snapshotTotalProfit = computed(() => {
+            return snapshotList.value.reduce((sum, item) => {
+                const diff = (parseFloat(item.last_nav) || 0) - (parseFloat(item.init_nav) || 0);
+                return sum + (diff * (parseFloat(item.exchange_rate) || 1.0));
+            }, 0);
+        });
+
+        const totalNetAssets = computed(() => rawAssets.value.reduce((s, a) => s + (parseFloat(a.cny_market_value) || 0), 0));
+        const totalProfitLoss = computed(() => rawAssets.value.reduce((s, a) => s + (parseFloat(a.cny_profit_loss) || 0), 0));
+
+        async function loadSnapshotData() {
+            const res = await apiFetch(`api.php?action=snapshot&month=${snapshotMonth.value}`);
+            if (res && res.success) {
+                snapshotList.value = res.data.map(item => ({ ...item, savingStatus: null }));
+            }
+        }
+        function openSnapshotTab() { currentTab.value = 'snapshot'; loadSnapshotData(); }
+
+        async function autoSaveRow(item) {
+            item.savingStatus = 'saving';
+            const payload = {
+                month: snapshotMonth.value,
+                asset_id: item.asset_id,
+                init_nav: parseFloat(item.init_nav) || 0,
+                last_nav: parseFloat(item.last_nav) || 0
+            };
+            const res = await apiFetch('api.php?action=snapshot', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+            if (res && res.success) {
+                item.savingStatus = 'saved';
+                setTimeout(() => { item.savingStatus = null; }, 1500);
+                fetch('api.php?action=dashboard').then(r => r.json()).then(data => {
+                    if (data && data.success) rawAssets.value = data.assets_raw;
+                });
+            } else {
+                item.savingStatus = 'error';
+            }
+        }
+
+        function openAccountModal(item) {
+            if (item) accountModal.value = { show: true, isEdit: true, form: { ...item } };
+            else accountModal.value = { show: true, isEdit: false, form: { id: null, name: '', description: '', sort_order: 0 } };
+        }
+        async function saveAccountModal() {
+            const m = accountModal.value;
+            const res = await apiFetch('api.php?action=account', { method: m.isEdit ? 'PUT' : 'POST', body: JSON.stringify(m.form) });
+            if (res && res.success) { m.show = false; initSystem(); }
+        }
+        async function deleteAccount(id) {
+            if (confirm('确认删除账户？')) { await apiFetch(`api.php?action=account&id=${id}`, { method: 'DELETE' }); initSystem(); }
+        }
+
+        function openAssetModal(item) {
+            if (item) assetModal.value = { show: true, isEdit: true, form: { ...item } };
+            else assetModal.value = { show: true, isEdit: false, form: { id: null, account_id: rawAccounts.value[0]?.id, name: '', type: '现金', risk_level: 'R1', currency: 'CNY', sort_order: 0 } };
+        }
+        async function saveAssetModal() {
+            const m = assetModal.value;
+            const res = await apiFetch('api.php?action=asset', { method: m.isEdit ? 'PUT' : 'POST', body: JSON.stringify(m.form) });
+            if (res && res.success) { m.show = false; initSystem(); }
+        }
+        async function deleteAsset(id) {
+            if (confirm('确认删除标的项目？')) { await apiFetch(`api.php?action=asset&id=${id}`, { method: 'DELETE' }); initSystem(); }
+        }
+
+        async function saveConfig() {
+            const res = await apiFetch('api.php?action=config', { method: 'POST', body: JSON.stringify(configForm.value) });
+            if (res && res.success) { alert('基础配置已更新'); configForm.value.new_password = ''; initSystem(); }
+        }
+
+        function renderCharts() {
+            const typeData = {};
+            const riskData = { 'R1': 0, 'R2': 0, 'R3': 0, 'R4': 0, 'R5': 0 };
+            rawAssets.value.forEach(ast => {
+                const val = parseFloat(ast.cny_market_value) || 0;
+                typeData[ast.type] = (typeData[ast.type] || 0) + val;
+                if (riskData[ast.risk_level] !== undefined) riskData[ast.risk_level] += val;
+            });
+
+            const tDom = document.getElementById('typeChart');
+            if (tDom) {
+                echarts.init(tDom, 'dark').setOption({
+                    backgroundColor: 'transparent', title: { text: '资产类型权重', left: 'center' },
+                    tooltip: { trigger: 'item' }, series: [{ type: 'pie', radius: '50%', data: Object.keys(typeData).map(k => ({ name: k, value: typeData[k] })) }]
+                });
+            }
+
+            const rDom = document.getElementById('riskChart');
+            if (rDom) {
+                echarts.init(rDom, 'dark').setOption({
+                    backgroundColor: 'transparent', title: { text: '波动风险等级暴露', left: 'center' },
+                    tooltip: { trigger: 'item' }, color: ['#10b981', '#3b82f6', '#f59e0b', '#f97316', '#ef4444'],
+                    series: [{ type: 'pie', radius: '50%', data: Object.keys(riskData).map(k => ({ name: k, value: riskData[k] })) }]
+                });
+            }
+
+            apiFetch('api.php?action=trends').then(res => {
+                const trDom = document.getElementById('trendChart');
+                if (res && res.success && trDom) {
+                    echarts.init(trDom, 'dark').setOption({
+                        backgroundColor: 'transparent', title: { text: '折合本位币资产走势与损益', left: 'center' },
+                        tooltip: { trigger: 'axis' }, xAxis: { type: 'category', data: res.trends.map(t => t.snapshot_date) },
+                        yAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151' } } },
+                        series: [
+                            { name: '资产净值总额', type: 'line', data: res.trends.map(t => t.total_asset), smooth: true },
+                            { name: '净当月损益', type: 'bar', data: res.trends.map(t => t.total_profit) }
+                        ]
+                    });
+                }
+            });
+        }
+
+        function formatMoney(val) { return (parseFloat(val) || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+        function getRiskBadgeClass(riskLevel) {
+            const map = {
+                'R1': 'bg-emerald-500/20 text-emerald-400',
+                'R2': 'bg-cyan-500/20 text-cyan-400',
+                'R3': 'bg-amber-500/20 text-amber-400',
+                'R4': 'bg-orange-500/20 text-orange-400',
+                'R5': 'bg-red-500/20 text-red-400'
+            };
+            return map[riskLevel] || 'bg-gray-700 text-gray-400';
+        }
+
+        onMounted(() => { initSystem(); });
+
+        return {
+            isLoggedIn, loginPassword, currentTab, currentMonth, rates, configForm,
+            rawAccounts, rawAssets, accountTree, snapshotTree, totalNetAssets, totalProfitLoss,
+            snapshotMonth, snapshotList, accountModal, assetModal,
+            snapshotTotalLast, snapshotTotalProfit,
+            handleLogin, handleLogout, openSnapshotTab, loadSnapshotData, autoSaveRow,
+            openAccountModal, saveAccountModal, deleteAccount, openAssetModal, saveAssetModal, deleteAsset,
+            saveConfig, formatMoney, getRiskBadgeClass
+        };
+    }
+}).mount('#app');
+</script>
+
+<style>
+[v-cloak] { display: none !important; }
+/* 隐藏损益单元格在极端缩放下的滚动条 */
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+</style>
+</body>
+</html>
