@@ -101,22 +101,40 @@ function handleTrends($db) {
     $usd = $rates['rate_usd'] ?? 7.25;
     $hkd = $rates['rate_hkd'] ?? 0.93;
 
-    $sql = "SELECT t.snapshot_date, SUM(t.cny_market_value) as total_asset, SUM(t.cny_profit_loss) as total_profit
-            FROM (
-                SELECT s.snapshot_date,
+    $baseSql = "SELECT s.snapshot_date, a.type,
                     s.last_nav * (CASE a.currency WHEN 'USD' THEN :usd WHEN 'HKD' THEN :hkd ELSE 1.0 END) as cny_market_value,
                     (s.last_nav - CASE 
                         WHEN s.init_nav IS NOT NULL THEN s.init_nav
                         ELSE IFNULL((SELECT prev.last_nav FROM asset_snapshots prev WHERE prev.asset_id = a.id AND prev.snapshot_date = strftime('%Y-%m', s.snapshot_date || '-01', '-1 month')), 0)
                     END) * (CASE a.currency WHEN 'USD' THEN :usd WHEN 'HKD' THEN :hkd ELSE 1.0 END) as cny_profit_loss
                 FROM asset_snapshots s
-                JOIN assets a ON s.asset_id = a.id
-            ) t
-            GROUP BY t.snapshot_date ORDER BY t.snapshot_date ASC";
+                JOIN assets a ON s.asset_id = a.id";
 
-    $stmt = $db->prepare($sql);
+    $trendSql = "SELECT t.snapshot_date, SUM(t.cny_market_value) as total_asset, SUM(t.cny_profit_loss) as total_profit
+                 FROM ($baseSql) t
+                 GROUP BY t.snapshot_date ORDER BY t.snapshot_date ASC";
+    $typeSql = "SELECT t.snapshot_date, t.type, SUM(t.cny_profit_loss) as total_profit
+                FROM ($baseSql) t
+                GROUP BY t.snapshot_date, t.type ORDER BY t.snapshot_date ASC, t.type ASC";
+
+    $stmt = $db->prepare($trendSql);
     $stmt->execute(['usd' => $usd, 'hkd' => $hkd]);
-    echo json_encode(['success' => true, 'trends' => $stmt->fetchAll()]);
+    $trends = $stmt->fetchAll();
+
+    $typeStmt = $db->prepare($typeSql);
+    $typeStmt->execute(['usd' => $usd, 'hkd' => $hkd]);
+    $profitByType = [];
+    $assetTypes = [];
+    foreach ($typeStmt->fetchAll() as $row) {
+        $type = $row['type'] ?: '未分类';
+        if (!isset($profitByType[$type])) {
+            $profitByType[$type] = [];
+            $assetTypes[] = $type;
+        }
+        $profitByType[$type][$row['snapshot_date']] = (float)$row['total_profit'];
+    }
+
+    echo json_encode(['success' => true, 'trends' => $trends, 'profit_by_type' => $profitByType, 'asset_types' => $assetTypes]);
 }
 
 function handleAccount($db, $method) {
