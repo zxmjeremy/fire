@@ -423,33 +423,84 @@ createApp({
                 if (riskData[ast.risk_level] !== undefined) riskData[ast.risk_level] += val;
             });
 
+            const pieLabel = {
+                show: true,
+                formatter: params => `${params.name}
+¥${formatMoney(params.value)}
+${params.percent}%`,
+                color: '#e5e7eb'
+            };
+            const pieTooltip = {
+                trigger: 'item',
+                formatter: params => `${params.marker}${params.name}<br/>金额：¥${formatMoney(params.value)}<br/>占比：${params.percent}%`
+            };
+
             const tDom = document.getElementById('typeChart');
             if (tDom) {
                 echarts.init(tDom, 'dark').setOption({
-                    backgroundColor: 'transparent', title: { text: '资产类型权重', left: 'center' },
-                    tooltip: { trigger: 'item' }, series: [{ type: 'pie', radius: '50%', data: Object.keys(typeData).map(k => ({ name: k, value: typeData[k] })) }]
+                    backgroundColor: 'transparent',
+                    title: { text: '资产类型占比', left: 'center' },
+                    tooltip: pieTooltip,
+                    series: [{
+                        type: 'pie',
+                        radius: ['35%', '58%'],
+                        label: pieLabel,
+                        labelLine: { length: 12, length2: 8 },
+                        data: Object.keys(typeData).map(k => ({ name: k, value: Number(typeData[k].toFixed(2)) }))
+                    }]
                 });
             }
 
             const rDom = document.getElementById('riskChart');
             if (rDom) {
                 echarts.init(rDom, 'dark').setOption({
-                    backgroundColor: 'transparent', title: { text: '波动风险等级暴露', left: 'center' },
-                    tooltip: { trigger: 'item' }, color: ['#10b981', '#3b82f6', '#f59e0b', '#f97316', '#ef4444'],
-                    series: [{ type: 'pie', radius: '50%', data: Object.keys(riskData).map(k => ({ name: k, value: riskData[k] })) }]
+                    backgroundColor: 'transparent',
+                    title: { text: '不同风险等级资产占比', left: 'center' },
+                    tooltip: pieTooltip,
+                    color: ['#10b981', '#3b82f6', '#f59e0b', '#f97316', '#ef4444'],
+                    series: [{
+                        type: 'pie',
+                        radius: ['35%', '58%'],
+                        label: pieLabel,
+                        labelLine: { length: 12, length2: 8 },
+                        data: Object.keys(riskData).map(k => ({ name: k, value: Number(riskData[k].toFixed(2)) }))
+                    }]
                 });
             }
 
             apiFetch('api.php?action=trends').then(res => {
                 const trDom = document.getElementById('trendChart');
                 if (res && res.success && trDom) {
+                    // 首月快照通常用于初始化净值，损益口径会显著偏离后续月份，因此不参与趋势图展示。
+                    const trends = (res.trends || []).slice(1);
+                    const months = trends.map(t => t.snapshot_date);
+                    const profitByType = res.profit_by_type || {};
+                    const assetTypes = res.asset_types || Object.keys(profitByType);
+                    const barSeries = assetTypes.map(type => ({
+                        name: `${type}净当月损益`,
+                        type: 'bar',
+                        stack: 'profit',
+                        yAxisIndex: 0,
+                        data: months.map(month => Number((parseFloat(profitByType[type]?.[month]) || 0).toFixed(2)))
+                    }));
                     echarts.init(trDom, 'dark').setOption({
-                        backgroundColor: 'transparent', title: { text: '折合本位币资产走势与损益', left: 'center' },
-                        tooltip: { trigger: 'axis' }, xAxis: { type: 'category', data: res.trends.map(t => t.snapshot_date) },
-                        yAxis: { type: 'value', splitLine: { lineStyle: { color: '#374151' } } },
+                        backgroundColor: 'transparent',
+                        title: { text: '不同资产类型净当月损益 + 资产净值总额', left: 'center' },
+                        tooltip: {
+                            trigger: 'axis',
+                            axisPointer: { type: 'cross' },
+                            valueFormatter: value => `¥${formatMoney(value)}`
+                        },
+                        legend: { top: 28, type: 'scroll' },
+                        grid: { top: 78, left: 80, right: 90, bottom: 45 },
+                        xAxis: { type: 'category', data: months },
+                        yAxis: [
+                            { type: 'value', name: '净当月损益', splitLine: { lineStyle: { color: '#374151' } }, axisLabel: { formatter: value => `¥${formatMoney(value)}` } },
+                            { type: 'value', name: '资产净值总额', splitLine: { show: false }, axisLabel: { formatter: value => `¥${formatMoney(value)}` } }
+                        ],
                         series: [
-                            { name: '资产净值总额', type: 'line', data: res.trends.map(t => t.total_asset), smooth: true },
-                            { name: '净当月损益', type: 'bar', data: res.trends.map(t => t.total_profit) }
+                            ...barSeries,
+                            { name: '资产净值总额', type: 'line', yAxisIndex: 1, data: trends.map(t => Number((parseFloat(t.total_asset) || 0).toFixed(2))), smooth: true, symbolSize: 8, lineStyle: { width: 3 } }
                         ]
                     });
                 }
